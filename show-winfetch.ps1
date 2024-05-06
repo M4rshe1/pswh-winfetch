@@ -1,3 +1,18 @@
+function Write-UsedBar
+{
+    param (
+        [int]$free,
+        [int]$total,
+        [String]$lable,
+        [String]$color
+    )
+    Write-Host "$lable% ".PadRight(6) -ForegroundColor $color -NoNewline
+    Write-Host "-=[ " -ForegroundColor White -NoNewline
+    Write-Host "".PadRight(20 - [math]::Round($free / $total * 20), "/") -ForegroundColor Red -NoNewline
+    Write-Host "".PadRight([math]::Round($free / $total * 20), "/") -ForegroundColor White -NoNewline
+    Write-Host " ]=-" -ForegroundColor White -NoNewline
+}
+
 function show-winfetch
 {
     param (
@@ -6,8 +21,6 @@ function show-winfetch
     clear-host
     Write-Host
     Write-Host
-    $username = $env:USERNAME
-    $hostname = $env:COMPUTERNAME
     $os = Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Caption
     $build = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' | Select-Object -ExpandProperty DisplayVersion
     $version = (Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Version).split('.')[-1]
@@ -22,32 +35,30 @@ function show-winfetch
     $CPU = Get-WmiObject -Class Win32_Processor | Select-Object -ExpandProperty Name
     $RAM = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum | Select-Object -ExpandProperty Sum
     $RAM = [math]::Round($RAM / 1MB, 2)
-    $FREE_RAM = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty FreePhysicalMemory
-    $FREE_RAM = [math]::Round($FREE_RAM / 1KB, 2)
-    $USED_RAM = $RAM - $FREE_RAM
+    $FREE_RAM = [math]::Round((Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty FreePhysicalMemory) / 1KB, 2)
     $Disk = Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty Size
     $Disk = [math]::Round($Disk / 1GB, 2)
-    $FREE_Disk = Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty FreeSpace
-    $FREE_Disk = [math]::Round($FREE_Disk / 1GB, 2)
+    $FREE_Disk = [math]::Round((Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty FreeSpace) / 1GB, 2)
     $resolution = "$( $resolution.Width )x$( $resolution.Height ) @$( $refreshRate )Hz"
 
+    $Global:OSLogos.GetEnumerator() | ForEach-Object {
+        if ( $os.toLower().replace(' ', '').contains($_.Name))
+        {
+            $Global:logoObject = $_.Value
+        }
+    }
 
-    if ($os -match "Windows 11")
+    if (-not $Global:logoObject)
     {
-        $logo = $Global:OSLogos.windows11
+        return "No logo found for $os"
     }
-    elseif ($os -match "Windows 10")
-    {
-        $logo = $Global:OSLogos.windows10
-    }
-    else
-    {
-        $logo = $Global:OSLogos.windows
-    }
+
     if ($logoOverride)
     {
-        $logo = $Global:OSLogos.$logoOverride
+        $Global:logoObject = $Global:OSLogos.$logoOverride
     }
+
+    $logo = $Global:logoObject.logo
 
     $labels = @(
         "",
@@ -64,7 +75,7 @@ function show-winfetch
     )
 
     $values = @(
-        "$username@$hostname",
+        "",
         "-------------------",
         "$os",
         "$build ($version)",
@@ -73,81 +84,52 @@ function show-winfetch
         "$terminal",
         "$CPU",
         "$GPU",
-        "$USED_RAM MB / $RAM MB ($([math]::Round($USED_RAM / $RAM * 100) )%)",
+        "$( $RAM - $FREE_RAM ) MB / $RAM MB ($([math]::Round(($RAM - $FREE_RAM) / $RAM * 100) )%)",
         "C:\ $DISK GB ($FREE_DISK GB free)"
     )
 
     $lines = $logo -split "`n"
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $lineContent = $lines[$i].padright(45, " ")
+        $lineContent = $lines[$i]
         $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 6, $Host.UI.RawUI.CursorPosition.Y
+        Write-Host "$lineContent" -ForegroundColor $logoObject.color -NoNewline
+        $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
         if ($i -eq 0)
         {
-            Write-Host "$lineContent " -ForegroundColor Blue -NoNewline
-            $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-            Write-Host "$username" -ForegroundColor Blue -NoNewline
+            Write-Host "$env:USERNAME" -ForegroundColor $logoObject.color -NoNewline
             Write-Host "@" -ForegroundColor White -NoNewline
-            Write-Host "$hostname" -ForegroundColor Blue
+            Write-Host "$env:COMPUTERNAME" -ForegroundColor $logoObject.color -NoNewline
         }
         elseif ($i -lt $labels.Count)
         {
-            Write-Host "$lineContent " -ForegroundColor Blue -NoNewline
-            $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-            Write-Host "$($labels[$i])" -ForegroundColor Blue -NoNewline
-            Write-Host "$( $values[$i] )" -ForegroundColor White
+            Write-Host "$( $labels[$i] )" -ForegroundColor $logoObject.color -NoNewline
+            Write-Host "$( $values[$i] )" -ForegroundColor White -NoNewline
         }
         elseif ($i -eq $labels.Count + 1)
         {
-            Write-Host "$lineContent " -ForegroundColor Blue -NoNewline
-            $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-            Write-Host "Mem%  " -ForegroundColor Blue -NoNewline
-            Write-Host "-=[ " -ForegroundColor White -NoNewline
-            Write-Host "".PadRight(20 - [math]::Round($FREE_RAM / $RAM * 20), "/") -ForegroundColor Red -NoNewline
-            Write-Host "".PadRight([math]::Round($FREE_RAM / $RAM * 20), "/") -ForegroundColor White -NoNewline
-            Write-Host " ]=-" -ForegroundColor White
+            Write-UsedBar -free $FREE_RAM -total $RAM -lable "Mem" -color $logoObject.color
         }
         elseif ($i -eq $labels.Count + 3)
         {
-            Write-Host "$lineContent " -ForegroundColor Blue -NoNewline
-            $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-            Write-Host "Disk% " -ForegroundColor Blue -NoNewline
-            Write-Host "-=[ " -ForegroundColor White -NoNewline
-            Write-Host "".PadRight(20 - [math]::Round($FREE_DISK / $DISK * 20), "/") -ForegroundColor Red -NoNewline
-            Write-Host "".PadRight([math]::Round($FREE_DISK / $DISK * 20), "/") -ForegroundColor White -NoNewline
-            Write-Host " ]=-" -ForegroundColor White
+            Write-UsedBar -free $FREE_DISK -total $DISK -lable "Disk" -color $logoObject.color
         }
-        elseif ($i -eq $labels.Count + 5)
+        elseif ($i -eq $labels.Count + 5 -or $i -eq $labels.Count + 6)
         {
-            Write-Host "$lineContent " -ForegroundColor Blue -NoNewline
-            $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-            Write-Host "    " -BackgroundColor Black -NoNewline
-            Write-Host "    " -BackgroundColor Blue -NoNewline
-            Write-Host "    " -BackgroundColor Green -NoNewline
-            Write-Host "    " -BackgroundColor Cyan -NoNewline
-            Write-Host "    " -BackgroundColor Red -NoNewline
-            Write-Host "    " -BackgroundColor Magenta -NoNewline
-            Write-Host "    " -BackgroundColor Yellow -NoNewline
-            Write-Host "    " -BackgroundColor White -NoNewline
-            Write-Host "" -BackgroundColor Black
+            if ($i % 2)
+            {
+                $color = "DarkGray"
+                $color2 = "Gray"
+            }
+            else
+            {
+                $color = "Black"
+                $color2 = "White"
+            }
+            @( $color, "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", $color2  ) | ForEach-Object {
+                Write-Host "    " -BackgroundColor $_ -NoNewline
+            }
         }
-        elseif ($i -eq $labels.Count + 6)
-        {
-            Write-Host "$lineContent " -ForegroundColor Blue -NoNewline
-            $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-            Write-Host "    " -BackgroundColor DarkGray -NoNewline
-            Write-Host "    " -BackgroundColor Blue -NoNewline
-            Write-Host "    " -BackgroundColor Green -NoNewline
-            Write-Host "    " -BackgroundColor Cyan -NoNewline
-            Write-Host "    " -BackgroundColor Red -NoNewline
-            Write-Host "    " -BackgroundColor Magenta -NoNewline
-            Write-Host "    " -BackgroundColor Yellow -NoNewline
-            Write-Host "    " -BackgroundColor Gray -NoNewline
-            Write-Host "" -BackgroundColor Black
-        }
-        else
-        {
-            Write-Host "$lineContent" -ForegroundColor Blue
-        }
+        Write-Host "" -BackgroundColor Black -ForegroundColor White
     }
     Write-Host
     Write-Host
@@ -155,8 +137,9 @@ function show-winfetch
 
 
 
-$Global:OSLogos = [PSCustomObject]@{
-    windows11 = @"
+$Global:OSLogos = @{
+    windows11 = @{
+        logo = @"
 WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
 WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
 WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
@@ -177,8 +160,11 @@ WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
 WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
 WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
 "@
-    windows10 = @"
-                                ..,
+        color = "Blue"
+    }
+    windows10 = @{
+        logo = @"
+                                  ..,
                       ....,,:;+ccWWWW
         ...,,+:;  cWWWWWWWWWWWWWWWWWW
   ,ccWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
@@ -198,7 +184,10 @@ WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
                          ''''''*::cWW
                                    ''
 "@
-    windows = @"
+        color = "Blue"
+    }
+    windows7 = @{
+        logo = @"
             .,;+##+;,
          :tt:::tt333EE3
          Et:::ztt33EEEL  @Ee.,      ..,
@@ -219,7 +208,8 @@ WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
 
 
 
-
 "@
+        color = "Blue"
+    }
 
 }
