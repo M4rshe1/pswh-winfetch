@@ -13,8 +13,7 @@ function Write-UsedBar
     Write-Host " ]=-" -ForegroundColor White -NoNewline
 }
 
-function show-winfetch
-{
+function show-winfetch {
     param (
         [string]$logoOverride
     )
@@ -24,14 +23,17 @@ function show-winfetch
     $os = Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Caption
     $build = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' | Select-Object -ExpandProperty DisplayVersion
     $version = (Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Version).split('.')[-1]
-    $uptime = Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty LastBootUpTime | ForEach-Object { [Management.ManagementDateTimeConverter]::ToDateTime($_) }
-    $uptime = New-TimeSpan -Start $uptime -End (Get-Date) | Select-Object -Property Days, Hours, Minutes, Seconds
+    $uptimeObject = Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty LastBootUpTime | ForEach-Object { [Management.ManagementDateTimeConverter]::ToDateTime($_) }
+    $uptime = New-TimeSpan -Start $uptimeObject -End (Get-Date) | Select-Object -Property Days, Hours, Minutes, Seconds
     $uptime = "$( $uptime.Days ) days, $( $uptime.Hours ) hours, $( $uptime.Minutes ) minutes, $( $uptime.Seconds ) seconds"
     $terminal = (Get-Host).UI.RawUI.WindowTitle
     $resolution = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Size
     $videoController = Get-WmiObject -Class Win32_VideoController
-    $refreshRate = [math]::Round([Int16]::Parse($videoController[-1].CurrentRefreshRate) / 5) * 5
-    $GPU = $videoController[-1].Name
+    if ($videoController.count -gt 1) {
+        $videoController = $videoController[-1]
+    }
+    $refreshRate = [math]::Round([Int16]::Parse($videoController.CurrentRefreshRate) / 5) * 5
+    $GPU = $videoController.Name
     $CPU = Get-WmiObject -Class Win32_Processor | Select-Object -ExpandProperty Name
     $RAM = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum | Select-Object -ExpandProperty Sum
     $RAM = [math]::Round($RAM / 1MB, 2)
@@ -42,19 +44,16 @@ function show-winfetch
     $resolution = "$( $resolution.Width )x$( $resolution.Height ) @$( $refreshRate )Hz"
 
     $Global:OSLogos.GetEnumerator() | ForEach-Object {
-        if ( $os.toLower().replace(' ', '').contains($_.Name))
-        {
+        if ( $os.toLower().replace(' ', '').contains($_.Name)) {
             $Global:logoObject = $_.Value
         }
     }
 
-    if (-not $Global:logoObject)
-    {
+    if (-not $Global:logoObject) {
         return "No logo found for $os"
     }
 
-    if ($logoOverride)
-    {
+    if ($logoOverride) {
         $Global:logoObject = $Global:OSLogos.$logoOverride
     }
 
@@ -89,39 +88,33 @@ function show-winfetch
     )
 
     $lines = $logo -split "`n"
+    Clear-Host
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $lineContent = $lines[$i]
         $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 6, $Host.UI.RawUI.CursorPosition.Y
         Write-Host "$lineContent" -ForegroundColor $logoObject.color -NoNewline
         $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-        if ($i -eq 0)
-        {
+        if ($i -eq 0) {
             Write-Host "$env:USERNAME" -ForegroundColor $logoObject.color -NoNewline
             Write-Host "@" -ForegroundColor White -NoNewline
             Write-Host "$env:COMPUTERNAME" -ForegroundColor $logoObject.color -NoNewline
         }
-        elseif ($i -lt $labels.Count)
-        {
+        elseif ($i -lt $labels.Count) {
             Write-Host "$( $labels[$i] )" -ForegroundColor $logoObject.color -NoNewline
             Write-Host "$( $values[$i] )" -ForegroundColor White -NoNewline
         }
-        elseif ($i -eq $labels.Count + 1)
-        {
+        elseif ($i -eq $labels.Count + 1) {
             Write-UsedBar -free $FREE_RAM -total $RAM -lable "Mem" -color $logoObject.color
         }
-        elseif ($i -eq $labels.Count + 3)
-        {
+        elseif ($i -eq $labels.Count + 3) {
             Write-UsedBar -free $FREE_DISK -total $DISK -lable "Disk" -color $logoObject.color
         }
-        elseif ($i -eq $labels.Count + 5 -or $i -eq $labels.Count + 6)
-        {
-            if ($i % 2)
-            {
+        elseif ($i -eq $labels.Count + 5 -or $i -eq $labels.Count + 6) {
+            if ($i % 2) {
                 $color = "DarkGray"
                 $color2 = "Gray"
             }
-            else
-            {
+            else {
                 $color = "Black"
                 $color2 = "White"
             }
