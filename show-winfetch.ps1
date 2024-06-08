@@ -1,62 +1,80 @@
-Add-Type -AssemblyName System.Windows.Forms
-
-function Write-UsedBar
-{
+function Write-UsedBar {
     param (
         [int]$free,
         [int]$total,
-        [String]$lable,
+        [String]$label,
         [String]$color
     )
-    Write-Host "$lable% ".PadRight(6) -ForegroundColor $color -NoNewline
+    Write-Host "$label% ".PadRight(6) -ForegroundColor $color -NoNewline
     Write-Host "-=[ " -ForegroundColor White -NoNewline
     Write-Host "".PadRight(20 - [math]::Round($free / $total * 20), "/") -ForegroundColor Red -NoNewline
     Write-Host "".PadRight([math]::Round($free / $total * 20), "/") -ForegroundColor White -NoNewline
     Write-Host " ]=-" -ForegroundColor White -NoNewline
 }
 
-function show-winfetch
-{
+function show-winfetch {
     param (
         [string]$logoOverride
     )
     clear-host
     Write-Host
     Write-Host
-    $os = Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Caption
-    $build = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' | Select-Object -ExpandProperty DisplayVersion
-    $version = (Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty Version).split('.')[-1]
-    $uptime = Get-WmiObject -Class Win32_OperatingSystem | Select-Object -ExpandProperty LastBootUpTime | ForEach-Object { [Management.ManagementDateTimeConverter]::ToDateTime($_) }
-    $uptime = New-TimeSpan -Start $uptime -End (Get-Date) | Select-Object -Property Days, Hours, Minutes, Seconds
-    $uptime = "$( $uptime.Days ) days, $( $uptime.Hours ) hours, $( $uptime.Minutes ) minutes, $( $uptime.Seconds ) seconds"
+
+    try {
+        $CMI = Get-CimInstance -ClassName Win32_OperatingSystem
+    } catch {
+        Write-Host "Failed to retrieve Win32_OperatingSystem instance: $_" -ForegroundColor Red
+        return
+    }
+
+    if (-not $CMI) {
+        Write-Host "No Win32_OperatingSystem instance found." -ForegroundColor Red
+        return
+    }
+
+    $os = $CMI.Caption
+    $build = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\' | Select-Object -ExpandProperty DisplayVersion) -replace "\s", ''
+    $version = ($CMI.Version).split('.')[-1]
+    try {
+        $lastBootUpTime = $CMI.LastBootUpTime
+        # Parse the localized date-time string to a DateTime object
+        $uptimeObject = [DateTime]::Parse($lastBootUpTime)
+        $uptime = New-TimeSpan -Start $uptimeObject -End (Get-Date)
+        $uptime = "$($uptime.Days) days, $($uptime.Hours) hours, $($uptime.Minutes) minutes, $($uptime.Seconds) seconds"
+    } catch {
+        Write-Host "Failed to retrieve or convert uptime: $_" -ForegroundColor Red
+        $uptime = "Unknown"
+    }
+
     $terminal = (Get-Host).UI.RawUI.WindowTitle
+    Add-Type -AssemblyName System.Windows.Forms
     $resolution = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Size
-    $videoController = Get-WmiObject -Class Win32_VideoController
-    $refreshRate = [math]::Round([Int16]::Parse($videoController[-1].CurrentRefreshRate) / 5) * 5
-    $GPU = $videoController[-1].Name
-    $CPU = Get-WmiObject -Class Win32_Processor | Select-Object -ExpandProperty Name
+    $videoController = Get-CimInstance -ClassName Win32_VideoController
+    if ($videoController.count -gt 1) {
+        $videoController = $videoController[-1]
+    }
+    $refreshRate = [math]::Round([Int16]::Parse($videoController.CurrentRefreshRate.ToString()) / 5) * 5
+    $GPU = $videoController.Name
+    $CPU = Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty Name
     $RAM = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum | Select-Object -ExpandProperty Sum
     $RAM = [math]::Round($RAM / 1MB, 2)
-    $FREE_RAM = [math]::Round((Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty FreePhysicalMemory) / 1KB, 2)
-    $Disk = Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty Size
+    $FREE_RAM = [math]::Round(($CMI.FreePhysicalMemory) / 1KB, 2)
+    $Disk = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty Size
     $Disk = [math]::Round($Disk / 1GB, 2)
-    $FREE_Disk = [math]::Round((Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty FreeSpace) / 1GB, 2)
+    $FREE_Disk = [math]::Round((Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DeviceID -eq 'C:' } | Select-Object -ExpandProperty FreeSpace) / 1GB, 2)
     $resolution = "$( $resolution.Width )x$( $resolution.Height ) @$( $refreshRate )Hz"
 
     $Global:OSLogos.GetEnumerator() | ForEach-Object {
-        if ( $os.toLower().replace(' ', '').contains($_.Name))
-        {
+        if ($os -and $os.toLower().replace(' ', '').contains($_.Name)) {
             $Global:logoObject = $_.Value
         }
     }
 
-    if (-not $Global:logoObject)
-    {
+    if (-not $Global:logoObject) {
         return "No logo found for $os"
     }
 
-    if ($logoOverride)
-    {
+    if ($logoOverride) {
         $Global:logoObject = $Global:OSLogos.$logoOverride
     }
 
@@ -91,39 +109,33 @@ function show-winfetch
     )
 
     $lines = $logo -split "`n"
+    Clear-Host
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $lineContent = $lines[$i]
         $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 6, $Host.UI.RawUI.CursorPosition.Y
         Write-Host "$lineContent" -ForegroundColor $logoObject.color -NoNewline
         $Host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates 53, $Host.UI.RawUI.CursorPosition.Y
-        if ($i -eq 0)
-        {
+        if ($i -eq 0) {
             Write-Host "$env:USERNAME" -ForegroundColor $logoObject.color -NoNewline
             Write-Host "@" -ForegroundColor White -NoNewline
             Write-Host "$env:COMPUTERNAME" -ForegroundColor $logoObject.color -NoNewline
         }
-        elseif ($i -lt $labels.Count)
-        {
+        elseif ($i -lt $labels.Count) {
             Write-Host "$( $labels[$i] )" -ForegroundColor $logoObject.color -NoNewline
             Write-Host "$( $values[$i] )" -ForegroundColor White -NoNewline
         }
-        elseif ($i -eq $labels.Count + 1)
-        {
-            Write-UsedBar -free $FREE_RAM -total $RAM -lable "Mem" -color $logoObject.color
+        elseif ($i -eq $labels.Count + 1) {
+            Write-UsedBar -free $FREE_RAM -total $RAM -label "Mem" -color $logoObject.color
         }
-        elseif ($i -eq $labels.Count + 3)
-        {
-            Write-UsedBar -free $FREE_DISK -total $DISK -lable "Disk" -color $logoObject.color
+        elseif ($i -eq $labels.Count + 3) {
+            Write-UsedBar -free $FREE_DISK -total $DISK -label "Disk" -color $logoObject.color
         }
-        elseif ($i -eq $labels.Count + 5 -or $i -eq $labels.Count + 6)
-        {
-            if ($i % 2)
-            {
+        elseif ($i -eq $labels.Count + 5 -or $i -eq $labels.Count + 6) {
+            if ($i % 2) {
                 $color = "DarkGray"
                 $color2 = "Gray"
             }
-            else
-            {
+            else {
                 $color = "Black"
                 $color2 = "White"
             }
@@ -136,8 +148,6 @@ function show-winfetch
     Write-Host
     Write-Host
 }
-
-
 
 $Global:OSLogos = @{
     windows11 = @{
@@ -174,7 +184,6 @@ WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
   WWWWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
   WWWWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
   WWWWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
-  WWWWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
 
   WWWWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
   WWWWWWWWWWWWWW  WWWWWWWWWWWWWWWWWWW
@@ -196,7 +205,7 @@ WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
         ;tt:::tt333EE7  ;EEEEEEttttt33#
        :Et:::zt333EEQ.  @EEEEEttttt33QL
        it::::tt333EEF  @EEEEEEttttt33F
-      ;3=*^'''"*4EEV  :EEEEEEttttt33@.
+      ;3=*^'''"*4EEV  :EEEEEEtttz33QF
       ,.=::::!t=.,    @EEEEEEtttz33QF
      ;::::::::zt33)    "4EEEtttji3P*
     :t::::::::tt33. :Z3z..  '' ,..g.
@@ -206,13 +215,9 @@ WWWWWWWWWWWWWWWWWW   WWWWWWWWWWWWWWWWWW
   (3=*^'''"*4E3)  ;EEEtttt:::::tZ'
                   :EEEEtttt::::z7
                    "VEzjt:;;z>*^'
-
-
-
-
 "@
         color = "Blue"
     }
-
 }
 
+show-winfetch
